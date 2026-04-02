@@ -536,6 +536,45 @@
     }
     .api-error strong { display: block; margin-bottom: 4px; }
 
+    /* ── LOCATION CHIPS ── */
+    .loc-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 8px;
+    }
+    .loc-chip {
+      font-size: 11px;
+      font-family: var(--mono);
+      padding: 3px 8px;
+      border-radius: 20px;
+      border: 1px solid;
+    }
+    .loc-chip.found  { color: var(--ok);   background: rgba(34,197,94,0.08);  border-color: rgba(34,197,94,0.25); }
+    .loc-chip.missing{ color: var(--err);  background: rgba(239,68,68,0.08);  border-color: rgba(239,68,68,0.25); }
+
+    .check-valor-disp {
+      font-family: var(--mono);
+      font-size: 12px;
+      color: var(--accent2);
+      margin: 3px 0 2px;
+      word-break: break-all;
+    }
+    .check-badge {
+      font-size: 10px;
+      font-family: var(--mono);
+      font-weight: 700;
+      padding: 3px 8px;
+      border-radius: 4px;
+      flex-shrink: 0;
+      letter-spacing: 0.05em;
+      align-self: flex-start;
+      margin-top: 2px;
+    }
+    .check-badge.ok   { background: rgba(34,197,94,0.1);  color: var(--ok);   border: 1px solid rgba(34,197,94,0.2); }
+    .check-badge.warn { background: rgba(245,158,11,0.1); color: var(--warn); border: 1px solid rgba(245,158,11,0.2); }
+    .check-badge.err  { background: rgba(239,68,68,0.1);  color: var(--err);  border: 1px solid rgba(239,68,68,0.2); }
+
     /* ── INLINE ERRORS ── */
     .field-error {
       display: none;
@@ -680,28 +719,28 @@
 
       <div class="field">
         <label>
-          Título del reporte
+          Título
           <span class="badge-req">requerido</span>
         </label>
-        <input type="text" id="titulo" placeholder="Ej: SuperApp · Validación de identidad">
+        <input type="text" id="titulo" placeholder="xxxx - xxxxxxxxxxxxx">
         <div id="err-titulo" class="field-error">⚠ El título del reporte es requerido.</div>
       </div>
 
       <div class="field">
         <label>
-          Tarea (ID Azure)
+          Tarea
           <span class="badge-req">requerido</span>
         </label>
-        <input type="text" id="tarea" placeholder="Ej: 1065-superapp-identity-validation">
-        <div id="err-tarea" class="field-error">⚠ La tarea (ID Azure) es requerida.</div>
+        <input type="text" id="tarea" placeholder="Ej: xxxxxxxxxxxxx">
+        <div id="err-tarea" class="field-error"></div>
       </div>
 
       <div class="field">
         <label>
-          Consecutivo
+          Cons
           <span class="badge-opt">opcional</span>
         </label>
-        <input type="text" id="consecutivo" placeholder="Ej: IF-SE-2024-001">
+        <input type="text" id="consecutivo" placeholder="xxxxxxxxxx">
       </div>
     </div>
 
@@ -966,17 +1005,21 @@ function updateLoading(title, msg) {
 //  PARSEO DEL DOCX
 // ══════════════════════════════════════════
 function extractText(xml) {
-  const matches = xml.match(/<w:t[^>]*>(.*?)<\/w:t>/gs) || [];
-  return matches.map(m => {
-    let content = m.replace(/<w:t[^>]*>/, '').replace(/<\/w:t>/, '');
-    return content
-      .replace(/&lt;/g, '<')
-      .replace(/&gt;/g, '>')
-      .replace(/&amp;/g, '&')
-      .replace(/&quot;/g, '"')
-      .replace(/&apos;/g, "'")
-      .replace(/&#xA;/g, '\n');
-  }).join(' ');
+  // Preservar estructura de párrafos para poder detectar secciones
+  const paraRegex = /<w:p[ >][\s\S]*?<\/w:p>/g;
+  const paras = xml.match(paraRegex) || [];
+  return paras.map(para => {
+    const tRegex = /<w:t[^>]*>(.*?)<\/w:t>/g;
+    let text = '';
+    let m;
+    while ((m = tRegex.exec(para)) !== null) {
+      text += m[1]
+        .replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+        .replace(/&amp;/g, '&').replace(/&quot;/g, '"')
+        .replace(/&apos;/g, "'").replace(/&#xA;/g, '\n');
+    }
+    return text;
+  }).filter(t => t.trim()).join('\n');
 }
 
 async function parseDOCX(file) {
@@ -1008,112 +1051,138 @@ function escapeRe(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-function countIn(text, value) {
-  if (!value || !value.trim()) return 0;
-  const re = new RegExp(escapeRe(value.trim()), 'gi');
-  return (text.match(re) || []).length;
+function contains(text, value) {
+  if (!value || !value.trim()) return false;
+  return text.toLowerCase().includes(value.toLowerCase().trim());
 }
 
 function hasPlaceholder(text, ...names) {
   return names.some(n => text.toLowerCase().includes(`<${n.toLowerCase()}>`));
 }
 
+function extractSection(text, fromHeading, toHeading) {
+  const lower = text.toLowerCase();
+  const start = lower.indexOf(fromHeading.toLowerCase());
+  if (start === -1) return '';
+  const searchFrom = start + fromHeading.length;
+  const end = toHeading ? lower.indexOf(toHeading.toLowerCase(), searchFrom) : text.length;
+  return text.substring(start, end === -1 ? text.length : end);
+}
+
 function runChecks(headerText, bodyText) {
   const full = headerText + '\n' + bodyText;
   const checks = [];
 
-  // ── Título
-  const tCount = countIn(full, state.titulo);
-  const tUnfilled = hasPlaceholder(full, 'titulo');
-  let tStatus, tMsg;
-  if (tUnfilled) {
-    tStatus = 'warn';
-    tMsg = 'El marcador <titulo> todavía existe en el documento (sin reemplazar).';
-  } else if (tCount === 0) {
-    tStatus = 'err';
-    tMsg = 'El valor ingresado no fue encontrado en ninguna parte del documento.';
-  } else if (tCount >= 3) {
-    tStatus = 'ok';
-    tMsg = `Encontrado ${tCount} veces · encabezado, historial de revisiones y conclusiones.`;
-  } else {
-    tStatus = 'warn';
-    tMsg = `Encontrado solo ${tCount} vez(veces). Se esperan mínimo 3 (encabezado + historial + conclusiones).`;
-  }
-  checks.push({ campo: 'Título', valor: state.titulo, status: tStatus, msg: tMsg });
+  // Extraer secciones del cuerpo
+  const secInfo       = extractSection(bodyText, 'Información del documento', 'Historial de revisiones');
+  const secHistorial  = extractSection(bodyText, 'Historial de revisiones', 'Información de la aplicación');
+  const secConclusion = extractSection(bodyText, 'Conclusiones', null);
 
-  // ── Tarea
-  const taCount = countIn(full, state.tarea);
-  const taUnfilled = hasPlaceholder(full, 'tarea', 'Tarea');
-  let taStatus, taMsg;
-  if (taUnfilled) {
-    taStatus = 'warn';
-    taMsg = 'El marcador <Tarea> todavía existe en el documento (sin reemplazar).';
-  } else if (taCount === 0) {
-    taStatus = 'err';
-    taMsg = 'El ID de tarea no fue encontrado en el documento (revisar tabla de conclusiones).';
-  } else {
-    taStatus = 'ok';
-    taMsg = `Encontrado ${taCount} vez(veces) en la tabla de conclusiones.`;
-  }
-  checks.push({ campo: 'Tarea · ID Azure', valor: state.tarea, status: taStatus, msg: taMsg });
+  // ── TÍTULO ──────────────────────────────
+  if (state.titulo) {
+    const tUnfilled = hasPlaceholder(full, 'titulo');
+    const tLocations = {
+      'Encabezado':              contains(headerText, state.titulo),
+      'Historial de revisiones': contains(secHistorial, state.titulo),
+      'Conclusiones':            contains(secConclusion, state.titulo)
+    };
+    const tAll  = Object.values(tLocations).every(Boolean);
+    const tSome = Object.values(tLocations).some(Boolean);
+    const tMiss = Object.entries(tLocations).filter(([,v])=>!v).map(([k])=>k);
 
-  // ── Consecutivo (opcional)
+    let tStatus, tMsg;
+    if (tUnfilled) {
+      tStatus = 'warn'; tMsg = 'Placeholder &lt;titulo&gt; todavía sin reemplazar en el documento.';
+    } else if (tAll) {
+      tStatus = 'ok';  tMsg = 'Coincide en todas las secciones esperadas.';
+    } else if (!tSome) {
+      tStatus = 'err'; tMsg = 'Valor no encontrado en ninguna sección del documento.';
+    } else {
+      tStatus = 'err'; tMsg = `Falta o es diferente en: <strong>${tMiss.join(', ')}</strong>`;
+    }
+    checks.push({ campo: 'Título', valor: state.titulo, status: tStatus, msg: tMsg, locations: tLocations });
+  }
+
+  // ── TAREA ────────────────────────────────
+  if (state.tarea) {
+    const taUnfilled = hasPlaceholder(full, 'Tarea', 'tarea');
+    const taLocations = {
+      'Conclusiones · fila ID Azure': contains(secConclusion, state.tarea)
+    };
+    let taStatus, taMsg;
+    if (taUnfilled) {
+      taStatus = 'warn'; taMsg = 'Placeholder &lt;Tarea&gt; todavía sin reemplazar.';
+    } else if (taLocations['Conclusiones · fila ID Azure']) {
+      taStatus = 'ok';  taMsg = 'Encontrado correctamente en la tabla de conclusiones.';
+    } else {
+      taStatus = 'err'; taMsg = 'No encontrado en la fila "ID Azure" de la tabla de conclusiones.';
+    }
+    checks.push({ campo: 'Tarea · ID Azure', valor: state.tarea, status: taStatus, msg: taMsg, locations: taLocations });
+  }
+
+  // ── CONSECUTIVO (opcional) ───────────────
+  const cUnfilled = hasPlaceholder(full, 'Consecutivo', 'consecutivo');
   if (state.consecutivo) {
-    const cCount = countIn(full, state.consecutivo);
-    const cUnfilled = hasPlaceholder(full, 'consecutivo', 'Consecutivo');
+    const cLocations = {
+      'Información del documento': contains(secInfo, state.consecutivo),
+      'Conclusiones':              contains(secConclusion, state.consecutivo)
+    };
+    const cAll  = Object.values(cLocations).every(Boolean);
+    const cSome = Object.values(cLocations).some(Boolean);
+    const cMiss = Object.entries(cLocations).filter(([,v])=>!v).map(([k])=>k);
+
     let cStatus, cMsg;
     if (cUnfilled) {
-      cStatus = 'warn';
-      cMsg = 'El marcador <Consecutivo> todavía existe (sin reemplazar).';
-    } else if (cCount === 0) {
-      cStatus = 'err';
-      cMsg = 'El consecutivo ingresado no fue encontrado en el documento.';
-    } else if (cCount >= 2) {
-      cStatus = 'ok';
-      cMsg = `Encontrado ${cCount} veces · información del documento y conclusiones.`;
+      cStatus = 'warn'; cMsg = 'Placeholder &lt;Consecutivo&gt; todavía sin reemplazar.';
+    } else if (cAll) {
+      cStatus = 'ok';  cMsg = 'Coincide en información del documento y conclusiones.';
+    } else if (!cSome) {
+      cStatus = 'err'; cMsg = 'Valor no encontrado en ninguna sección.';
     } else {
-      cStatus = 'warn';
-      cMsg = `Encontrado solo ${cCount} vez(veces). Se esperan 2 (info del doc + conclusiones).`;
+      cStatus = 'err'; cMsg = `Falta o es diferente en: <strong>${cMiss.join(', ')}</strong>`;
     }
-    checks.push({ campo: 'Consecutivo', valor: state.consecutivo, status: cStatus, msg: cMsg });
-  } else if (hasPlaceholder(full, 'consecutivo', 'Consecutivo')) {
-    checks.push({
-      campo: 'Consecutivo', valor: null, status: 'warn',
-      msg: 'El campo <Consecutivo> no ha sido llenado y no se ingresó valor de referencia.'
-    });
+    checks.push({ campo: 'Consecutivo', valor: state.consecutivo, status: cStatus, msg: cMsg, locations: cLocations });
+  } else if (cUnfilled) {
+    checks.push({ campo: 'Consecutivo', valor: null, status: 'warn',
+      msg: 'Campo &lt;Consecutivo&gt; sin completar. No se proporcionó valor de referencia.' });
   }
 
-  // ── Autor (interno)
-  const aUnfilled = hasPlaceholder(full, 'autor', 'Autor');
-  checks.push({
-    campo: 'Autor', valor: null, status: aUnfilled ? 'warn' : 'ok',
-    msg: aUnfilled
-      ? 'El campo <Autor> sigue sin completarse en el historial de revisiones.'
-      : 'Campo autor completado en el historial de revisiones.'
+  // ── AUTOR (consistencia interna) ─────────
+  const autorUnfilled = hasPlaceholder(full, 'autor', 'Autor');
+  checks.push({ campo: 'Autor', valor: null,
+    status: autorUnfilled ? 'warn' : 'ok',
+    msg: autorUnfilled
+      ? 'Campo &lt;Autor&gt; sin completar en historial de revisiones.'
+      : 'Campo autor completado en historial de revisiones.'
   });
 
-  // ── Fecha (interna)
-  const fUnfilled = hasPlaceholder(full, 'fecha', 'Fecha');
-  checks.push({
-    campo: 'Fecha', valor: null, status: fUnfilled ? 'warn' : 'ok',
-    msg: fUnfilled
-      ? 'El campo <fecha> sigue sin completarse (encabezado y/o historial de revisiones).'
-      : 'Campo fecha completado en el documento.'
+  // ── FECHA (consistencia interna) ─────────
+  const fechaUnfilled = hasPlaceholder(full, 'fecha', 'Fecha');
+  const fechaLocations = {
+    'Encabezado':              !hasPlaceholder(headerText, 'fecha'),
+    'Historial de revisiones': !hasPlaceholder(secHistorial, 'fecha')
+  };
+  const fechaAllFilled = Object.values(fechaLocations).every(Boolean);
+  checks.push({ campo: 'Fecha', valor: null,
+    status: fechaUnfilled ? 'warn' : 'ok',
+    msg: fechaUnfilled
+      ? 'Campo &lt;fecha&gt; sin completar en: ' +
+        Object.entries(fechaLocations).filter(([,v])=>!v).map(([k])=>k).join(', ') + '.'
+      : 'Campo fecha completado en encabezado e historial.',
+    locations: fechaLocations
   });
 
-  // ── Placeholders de texto de vulnerabilidad
+  // ── CAMPOS TEXTO VULNERABILIDAD ──────────
   const textoMap = {
-    'texto_desc': 'Descripción de vulnerabilidad',
+    'texto_desc':  'Descripción de vulnerabilidad',
     'texto_repro': 'Pasos de reproducción',
-    'texto_imp': 'Impacto',
+    'texto_imp':   'Impacto',
     'texto_recom': 'Recomendación'
   };
   Object.entries(textoMap).forEach(([key, label]) => {
     if (hasPlaceholder(full, key)) {
-      checks.push({
-        campo: label, valor: null, status: 'warn',
-        msg: `El marcador <${key}> no ha sido reemplazado con contenido real.`
-      });
+      checks.push({ campo: label, valor: null, status: 'warn',
+        msg: `Placeholder &lt;${key}&gt; sin reemplazar con contenido real.` });
     }
   });
 
@@ -1242,6 +1311,14 @@ function statusLabel(s) {
   return s === 'ok' ? 'OK' : s === 'warn' ? 'AVISO' : 'ERROR';
 }
 
+function renderLocations(locs) {
+  return `<div class="loc-chips">` +
+    Object.entries(locs).map(([loc, found]) =>
+      `<span class="loc-chip ${found ? 'found' : 'missing'}">${found ? '✓' : '✗'} ${loc}</span>`
+    ).join('') +
+  `</div>`;
+}
+
 function renderChecks(checks) {
   const container = document.getElementById('checksContainer');
   container.innerHTML = checks.map(c => `
@@ -1249,10 +1326,11 @@ function renderChecks(checks) {
       <span class="check-icon">${statusIcon(c.status)}</span>
       <div class="check-info">
         <div class="check-campo">${c.campo}</div>
+        ${c.valor ? `<div class="check-valor-disp">"${c.valor}"</div>` : ''}
         <div class="check-msg">${c.msg}</div>
-        ${c.valor ? `<div style="margin-top:4px;font-family:var(--mono);font-size:11px;color:var(--muted)">valor: <span style="color:var(--accent2)">${c.valor}</span></div>` : ''}
+        ${c.locations ? renderLocations(c.locations) : ''}
       </div>
-      <span class="check-valor ${c.status}">${statusLabel(c.status)}</span>
+      <span class="check-badge ${c.status}">${statusLabel(c.status)}</span>
     </div>
   `).join('');
 }
@@ -1387,4 +1465,3 @@ function toggleKey() {
 </script>
 </body>
 </html>
-
