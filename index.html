@@ -755,9 +755,9 @@ function goToStep2() {
   state.consecutivo = document.getElementById('consecutivo').value.trim();
 
   if (document.getElementById('saveKey').checked) {
-    localStorage.setItem('sura_api_key', apiKey);
+    localStorage.setItem('su_api_key', apiKey);
   } else {
-    localStorage.removeItem('sura_api_key');
+    localStorage.removeItem('su_api_key');
   }
 
   goToStep(2);
@@ -1174,7 +1174,7 @@ function toggleKey() {
 //  INIT
 // ══════════════════════════════════════════
 (function init() {
-  const saved = localStorage.getItem('sura_api_key');
+  const saved = localStorage.getItem('su_api_key');
   if (saved) {
     document.getElementById('apiKey').value = saved;
     document.getElementById('saveKey').checked = true;
