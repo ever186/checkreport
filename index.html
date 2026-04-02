@@ -536,6 +536,21 @@
     }
     .api-error strong { display: block; margin-bottom: 4px; }
 
+    /* ── INLINE ERRORS ── */
+    .field-error {
+      display: none;
+      font-size: 11px;
+      color: var(--err);
+      margin-top: 5px;
+      font-family: var(--mono);
+      padding: 4px 8px;
+      background: rgba(239,68,68,0.08);
+      border-radius: 4px;
+      border-left: 2px solid var(--err);
+    }
+    .field-error.show { display: block; }
+    .field input.invalid { border-color: var(--err) !important; box-shadow: 0 0 0 3px rgba(239,68,68,0.1) !important; }
+
     /* ── PROVIDER SELECTOR ── */
     .provider-grid {
       display: grid;
@@ -649,6 +664,7 @@
           <input type="password" id="apiKey" placeholder="sk-ant-api03-..." autocomplete="off">
           <button class="key-toggle" onclick="toggleKey()" title="Mostrar/ocultar">👁️</button>
         </div>
+        <div id="err-apiKey" class="field-error">⚠ Ingresa tu API Key del proveedor seleccionado.</div>
         <div id="keyHint" style="font-size:11px;color:var(--muted);margin-top:6px;font-family:var(--mono)">
           Consigue tu key en: <a id="keyLink" href="https://console.anthropic.com" target="_blank" style="color:var(--accent2)">console.anthropic.com</a>
         </div>
@@ -664,26 +680,28 @@
 
       <div class="field">
         <label>
-          Título
+          Título del reporte
           <span class="badge-req">requerido</span>
         </label>
-        <input type="text" id="titulo" placeholder="Ej: xxxxx - titulo tarea">
+        <input type="text" id="titulo" placeholder="Ej: SuperApp · Validación de identidad">
+        <div id="err-titulo" class="field-error">⚠ El título del reporte es requerido.</div>
       </div>
 
       <div class="field">
         <label>
-          Tarea
+          Tarea (ID Azure)
           <span class="badge-req">requerido</span>
         </label>
-        <input type="text" id="tarea" placeholder="1xxxxxxxxxxxx">
+        <input type="text" id="tarea" placeholder="Ej: 1065-superapp-identity-validation">
+        <div id="err-tarea" class="field-error">⚠ La tarea (ID Azure) es requerida.</div>
       </div>
 
       <div class="field">
         <label>
-          Cons
+          Consecutivo
           <span class="badge-opt">opcional</span>
         </label>
-        <input type="text" id="cons" placeholder="Ej: xxxxxxxxxxx">
+        <input type="text" id="consecutivo" placeholder="Ej: IF-SE-2024-001">
       </div>
     </div>
 
@@ -846,25 +864,44 @@ function goToStep(n) {
 
 function goToStep1() { goToStep(1); }
 
+function clearErrors() {
+  ['apiKey', 'titulo', 'tarea'].forEach(id => {
+    document.getElementById(id).classList.remove('invalid');
+    document.getElementById(`err-${id}`).classList.remove('show');
+  });
+}
+
+function showError(id) {
+  document.getElementById(id).classList.add('invalid');
+  document.getElementById(`err-${id}`).classList.add('show');
+  document.getElementById(id).focus();
+}
+
 function goToStep2() {
+  clearErrors();
+
   const apiKey = document.getElementById('apiKey').value.trim();
   const titulo = document.getElementById('titulo').value.trim();
   const tarea  = document.getElementById('tarea').value.trim();
 
-  if (!apiKey) { alert('Ingresa tu API Key del proveedor seleccionado.'); return; }
-  if (!titulo) { alert('El título del reporte es requerido.'); return; }
-  if (!tarea)  { alert('La tarea (ID Azure) es requerida.'); return; }
+  let hasError = false;
+  if (!tarea)  { showError('tarea');  hasError = true; }
+  if (!titulo) { showError('titulo'); hasError = true; }
+  if (!apiKey) { showError('apiKey'); hasError = true; }
+  if (hasError) return;
 
   state.apiKey      = apiKey;
   state.titulo      = titulo;
   state.tarea       = tarea;
   state.consecutivo = document.getElementById('consecutivo').value.trim();
 
-  if (document.getElementById('saveKey').checked) {
-    localStorage.setItem(`ai_key_${state.provider}`, apiKey);
-  } else {
-    localStorage.removeItem(`ai_key_${state.provider}`);
-  }
+  try {
+    if (document.getElementById('saveKey').checked) {
+      localStorage.setItem(`ai_key_${state.provider}`, apiKey);
+    } else {
+      localStorage.removeItem(`ai_key_${state.provider}`);
+    }
+  } catch(e) { /* localStorage puede estar bloqueado en algunos contextos */ }
 
   goToStep(2);
 }
@@ -1339,11 +1376,13 @@ function toggleKey() {
 //  INIT
 // ══════════════════════════════════════════
 (function init() {
-  const saved = localStorage.getItem('ai_key_anthropic');
-  if (saved) {
-    document.getElementById('apiKey').value = saved;
-    document.getElementById('saveKey').checked = true;
-  }
+  try {
+    const saved = localStorage.getItem('ai_key_anthropic');
+    if (saved) {
+      document.getElementById('apiKey').value = saved;
+      document.getElementById('saveKey').checked = true;
+    }
+  } catch(e) { /* localStorage bloqueado */ }
 })();
 </script>
 </body>
