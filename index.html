@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Verificador de Reportes · Seguridad NTT Data</title>
+  <title>Verificador de Reportes · Seguridad Data</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
@@ -536,6 +536,36 @@
     }
     .api-error strong { display: block; margin-bottom: 4px; }
 
+    /* ── PROVIDER SELECTOR ── */
+    .provider-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 10px;
+    }
+    .provider-btn {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+      padding: 14px 8px;
+      border-radius: 10px;
+      border: 1px solid var(--border2);
+      background: var(--s2);
+      cursor: pointer;
+      transition: all 0.2s;
+      text-align: center;
+    }
+    .provider-btn:hover { border-color: var(--accent2); background: rgba(14,165,233,0.05); }
+    .provider-btn.active { border-color: var(--accent); background: rgba(0,201,167,0.08); box-shadow: 0 0 0 1px rgba(0,201,167,0.2); }
+    .provider-btn .p-icon { font-size: 20px; }
+    .provider-btn .p-name { font-size: 12px; font-weight: 600; color: var(--text); }
+    .provider-btn .p-model { font-size: 10px; color: var(--muted); font-family: var(--mono); }
+    .provider-btn.active .p-name { color: var(--accent); }
+
+    @media (max-width: 480px) {
+      .provider-grid { grid-template-columns: repeat(2, 1fr); }
+    }
+
     .hidden { display: none !important; }
 
     /* Responsive */
@@ -555,7 +585,7 @@
     <div class="logo-icon">🛡️</div>
     <div class="logo-text">
       <h1>Verificador de Reportes</h1>
-      <p>Seguridad · NTT Data</p>
+      <p>Seguridad · Data</p>
     </div>
   </div>
   <span class="header-badge">v1.0.0</span>
@@ -585,12 +615,42 @@
   <!-- STEP 1: Parámetros -->
   <div class="step-panel active" id="step1">
     <div class="card">
-      <div class="card-title">API Key de Anthropic</div>
+      <div class="card-title">Proveedor de IA</div>
+
       <div class="field">
-        <label>Clave API</label>
+        <label>Selecciona el proveedor</label>
+        <div class="provider-grid" id="providerGrid">
+          <div class="provider-btn active" data-provider="anthropic" onclick="selectProvider('anthropic')">
+            <span class="p-icon">🟣</span>
+            <span class="p-name">Anthropic</span>
+            <span class="p-model">Claude Sonnet</span>
+          </div>
+          <div class="provider-btn" data-provider="openai" onclick="selectProvider('openai')">
+            <span class="p-icon">⚫</span>
+            <span class="p-name">OpenAI</span>
+            <span class="p-model">GPT-4o mini</span>
+          </div>
+          <div class="provider-btn" data-provider="groq" onclick="selectProvider('groq')">
+            <span class="p-icon">🟠</span>
+            <span class="p-name">Groq</span>
+            <span class="p-model">Llama 3 · Free</span>
+          </div>
+          <div class="provider-btn" data-provider="gemini" onclick="selectProvider('gemini')">
+            <span class="p-icon">🔵</span>
+            <span class="p-name">Google</span>
+            <span class="p-model">Gemini 1.5 Flash</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="field">
+        <label>API Key <span id="providerLabel" class="badge-opt">Anthropic</span></label>
         <div class="key-wrapper">
           <input type="password" id="apiKey" placeholder="sk-ant-api03-..." autocomplete="off">
           <button class="key-toggle" onclick="toggleKey()" title="Mostrar/ocultar">👁️</button>
+        </div>
+        <div id="keyHint" style="font-size:11px;color:var(--muted);margin-top:6px;font-family:var(--mono)">
+          Consigue tu key en: <a id="keyLink" href="https://console.anthropic.com" target="_blank" style="color:var(--accent2)">console.anthropic.com</a>
         </div>
         <div class="save-row">
           <input type="checkbox" id="saveKey" checked>
@@ -707,11 +767,57 @@
 // ══════════════════════════════════════════
 const state = {
   apiKey: '',
+  provider: 'anthropic',
   titulo: '',
   tarea: '',
   consecutivo: '',
   file: null
 };
+
+const PROVIDERS = {
+  anthropic: {
+    name: 'Anthropic',
+    placeholder: 'sk-ant-api03-...',
+    hint: 'Consigue tu key en:',
+    link: 'https://console.anthropic.com',
+    linkText: 'console.anthropic.com'
+  },
+  openai: {
+    name: 'OpenAI',
+    placeholder: 'sk-proj-...',
+    hint: 'Consigue tu key en:',
+    link: 'https://platform.openai.com/api-keys',
+    linkText: 'platform.openai.com'
+  },
+  groq: {
+    name: 'Groq (Free)',
+    placeholder: 'gsk_...',
+    hint: 'Tier gratuito disponible en:',
+    link: 'https://console.groq.com',
+    linkText: 'console.groq.com'
+  },
+  gemini: {
+    name: 'Google Gemini',
+    placeholder: 'AIza...',
+    hint: 'Consigue tu key en:',
+    link: 'https://aistudio.google.com/app/apikey',
+    linkText: 'aistudio.google.com'
+  }
+};
+
+function selectProvider(p) {
+  state.provider = p;
+  document.querySelectorAll('.provider-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.provider === p);
+  });
+  const cfg = PROVIDERS[p];
+  document.getElementById('providerLabel').textContent = cfg.name;
+  document.getElementById('apiKey').placeholder = cfg.placeholder;
+  document.getElementById('keyHint').innerHTML =
+    `${cfg.hint} <a href="${cfg.link}" target="_blank" style="color:var(--accent2)">${cfg.linkText}</a>`;
+  const saved = localStorage.getItem(`ai_key_${p}`);
+  document.getElementById('apiKey').value = saved || '';
+}
 
 // ══════════════════════════════════════════
 //  NAVEGACIÓN
@@ -745,7 +851,7 @@ function goToStep2() {
   const titulo = document.getElementById('titulo').value.trim();
   const tarea  = document.getElementById('tarea').value.trim();
 
-  if (!apiKey) { alert('Ingresa tu API Key de Anthropic.'); return; }
+  if (!apiKey) { alert('Ingresa tu API Key del proveedor seleccionado.'); return; }
   if (!titulo) { alert('El título del reporte es requerido.'); return; }
   if (!tarea)  { alert('La tarea (ID Azure) es requerida.'); return; }
 
@@ -755,9 +861,9 @@ function goToStep2() {
   state.consecutivo = document.getElementById('consecutivo').value.trim();
 
   if (document.getElementById('saveKey').checked) {
-    localStorage.setItem('su_api_key', apiKey);
+    localStorage.setItem(`ai_key_${state.provider}`, apiKey);
   } else {
-    localStorage.removeItem('su_api_key');
+    localStorage.removeItem(`ai_key_${state.provider}`);
   }
 
   goToStep(2);
@@ -981,52 +1087,111 @@ function runChecks(headerText, bodyText) {
 //  API SPELL CHECK
 // ══════════════════════════════════════════
 async function spellCheck(bodyText) {
-  // Extraer sección de vulnerabilidades
   const match = bodyText.match(/Vulnerabilidades\s+encontradas([\s\S]*?)An[aá]lisis\s+de\s+vulnerabilidades/i);
   const section = match ? match[1].trim() : '';
 
   if (!section || section.length < 30) {
     return {
-      errores: [],
-      total: 0,
+      errores: [], total: 0,
       nota: 'No se detectó contenido en la sección "Vulnerabilidades encontradas". Puede que los campos texto_xxxx no hayan sido llenados.'
     };
   }
 
-  const response = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': state.apiKey,
-      'anthropic-version': '2023-06-01',
-      'anthropic-dangerous-direct-browser-access': 'true'
-    },
-    body: JSON.stringify({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 1000,
-      system: 'Eres un corrector ortográfico especializado en documentos técnicos de ciberseguridad en español colombiano. Identifies errores ortográficos reales únicamente (no de puntuación, estilo ni tecnicismos en inglés). Responde SOLO con JSON válido, sin markdown.',
-      messages: [{
-        role: 'user',
-        content: `Revisa ortografía del siguiente texto de un informe de pruebas de seguridad. Ignora tecnicismos en inglés (API, endpoint, payload, etc.). Devuelve SOLO este JSON:
+  const prompt = `Revisa ortografía del siguiente texto de un informe de seguridad en español. Ignora tecnicismos en inglés (API, endpoint, payload, HTTP, etc.). Devuelve SOLO este JSON (sin markdown):
 {"errores":[{"palabra":"palabra_incorrecta","sugerencia":"corrección","contexto":"fragmento donde aparece"}],"total":0}
-
 Si no hay errores: {"errores":[],"total":0}
 
 Texto:
-${section.substring(0, 2500)}`
-      }]
-    })
-  });
+${section.substring(0, 2500)}`;
+
+  const system = 'Eres un corrector ortográfico para documentos técnicos en español colombiano. Responde SOLO con JSON válido, sin markdown.';
+
+  let response;
+
+  if (state.provider === 'anthropic') {
+    response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': state.apiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true'
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 1000,
+        system,
+        messages: [{ role: 'user', content: prompt }]
+      })
+    });
+
+  } else if (state.provider === 'openai') {
+    response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${state.apiKey}`
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        max_tokens: 1000,
+        messages: [
+          { role: 'system', content: system },
+          { role: 'user', content: prompt }
+        ]
+      })
+    });
+
+  } else if (state.provider === 'groq') {
+    response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${state.apiKey}`
+      },
+      body: JSON.stringify({
+        model: 'llama3-8b-8192',
+        max_tokens: 1000,
+        messages: [
+          { role: 'system', content: system },
+          { role: 'user', content: prompt }
+        ]
+      })
+    });
+
+  } else if (state.provider === 'gemini') {
+    response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${state.apiKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: system + '\n\n' + prompt }] }],
+          generationConfig: { maxOutputTokens: 1000 }
+        })
+      }
+    );
+  }
 
   if (!response.ok) {
     const err = await response.json().catch(() => ({}));
-    throw new Error(err.error?.message || `HTTP ${response.status}`);
+    const msg = err.error?.message || err.error?.status || `HTTP ${response.status}`;
+    throw new Error(msg);
   }
 
   const data = await response.json();
-  const raw = data.content[0].text.trim()
-    .replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/\s*```$/i, '').trim();
 
+  // Extraer texto según proveedor
+  let raw = '';
+  if (state.provider === 'anthropic') {
+    raw = data.content[0].text;
+  } else if (state.provider === 'openai' || state.provider === 'groq') {
+    raw = data.choices[0].message.content;
+  } else if (state.provider === 'gemini') {
+    raw = data.candidates[0].content.parts[0].text;
+  }
+
+  raw = raw.trim().replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/\s*```$/i, '').trim();
   return JSON.parse(raw);
 }
 
@@ -1174,7 +1339,7 @@ function toggleKey() {
 //  INIT
 // ══════════════════════════════════════════
 (function init() {
-  const saved = localStorage.getItem('su_api_key');
+  const saved = localStorage.getItem('ai_key_anthropic');
   if (saved) {
     document.getElementById('apiKey').value = saved;
     document.getElementById('saveKey').checked = true;
@@ -1183,3 +1348,4 @@ function toggleKey() {
 </script>
 </body>
 </html>
+
