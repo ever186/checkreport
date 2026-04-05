@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Verificador de Reportes · Seguridad Data</title>
+  <title>Verificador de Reportes · Seguridad NTT Data</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
@@ -639,7 +639,7 @@
     <div class="logo-icon">🛡️</div>
     <div class="logo-text">
       <h1>Verificador de Reportes</h1>
-      <p>Seguridad · Data</p>
+      <p>Seguridad · NTT Data</p>
     </div>
   </div>
   <span class="header-badge">v1.0.0</span>
@@ -700,16 +700,12 @@
       <div class="field">
         <label>API Key <span id="providerLabel" class="badge-opt">Anthropic</span></label>
         <div class="key-wrapper">
-          <input type="password" id="apiKey" placeholder="sk-ant-api03-..." autocomplete="off">
+          <input type="password" id="apiKey" placeholder="" autocomplete="off">
           <button class="key-toggle" onclick="toggleKey()" title="Mostrar/ocultar">👁️</button>
         </div>
         <div id="err-apiKey" class="field-error">⚠ Ingresa tu API Key del proveedor seleccionado.</div>
         <div id="keyHint" style="font-size:11px;color:var(--muted);margin-top:6px;font-family:var(--mono)">
           Consigue tu key en: <a id="keyLink" href="https://console.anthropic.com" target="_blank" style="color:var(--accent2)">console.anthropic.com</a>
-        </div>
-        <div class="save-row">
-          <input type="checkbox" id="saveKey" checked>
-          <label for="saveKey">Recordar en este dispositivo (localStorage)</label>
         </div>
       </div>
     </div>
@@ -722,8 +718,8 @@
           Título
           <span class="badge-req">requerido</span>
         </label>
-        <input type="text" id="titulo" placeholder="xxxx - xxxxxxxxxxxxx">
-        <div id="err-titulo" class="field-error">⚠ El título del reporte es requerido.</div>
+        <input type="text" id="titulo" placeholder="" autocomplete="off">
+        <div id="err-titulo" class="field-error">⚠ El título es requerido.</div>
       </div>
 
       <div class="field">
@@ -731,16 +727,16 @@
           Tarea
           <span class="badge-req">requerido</span>
         </label>
-        <input type="text" id="tarea" placeholder="Ej: xxxxxxxxxxxxx">
-        <div id="err-tarea" class="field-error"></div>
+        <input type="text" id="tarea" placeholder="" autocomplete="off">
+        <div id="err-tarea" class="field-error">⚠ La tarea es requerida.</div>
       </div>
 
       <div class="field">
         <label>
-          Cons
+          Número
           <span class="badge-opt">opcional</span>
         </label>
-        <input type="text" id="consecutivo" placeholder="xxxxxxxxxx">
+        <input type="text" id="consecutivo" placeholder="" autocomplete="off">
       </div>
     </div>
 
@@ -872,8 +868,7 @@ function selectProvider(p) {
   document.getElementById('apiKey').placeholder = cfg.placeholder;
   document.getElementById('keyHint').innerHTML =
     `${cfg.hint} <a href="${cfg.link}" target="_blank" style="color:var(--accent2)">${cfg.linkText}</a>`;
-  const saved = localStorage.getItem(`ai_key_${p}`);
-  document.getElementById('apiKey').value = saved || '';
+  document.getElementById('apiKey').value = '';
 }
 
 // ══════════════════════════════════════════
@@ -933,14 +928,6 @@ function goToStep2() {
   state.titulo      = titulo;
   state.tarea       = tarea;
   state.consecutivo = document.getElementById('consecutivo').value.trim();
-
-  try {
-    if (document.getElementById('saveKey').checked) {
-      localStorage.setItem(`ai_key_${state.provider}`, apiKey);
-    } else {
-      localStorage.removeItem(`ai_key_${state.provider}`);
-    }
-  } catch(e) { /* localStorage puede estar bloqueado en algunos contextos */ }
 
   goToStep(2);
 }
@@ -1077,50 +1064,47 @@ function runChecks(headerText, bodyText) {
   const secInfo       = extractSection(bodyText, 'Información del documento', 'Historial de revisiones');
   const secHistorial  = extractSection(bodyText, 'Historial de revisiones', 'Información de la aplicación');
   const secConclusion = extractSection(bodyText, 'Conclusiones', null);
+  const secVuln       = extractSection(bodyText, 'Vulnerabilidades encontradas', 'Análisis de vulnerabilidades');
 
-  // ── TÍTULO ──────────────────────────────
+  // ── TÍTULO ──────────────────────────────────────────────────────
   if (state.titulo) {
     const tUnfilled = hasPlaceholder(full, 'titulo');
     const tLocations = {
-      'Encabezado':              contains(headerText, state.titulo),
-      'Historial de revisiones': contains(secHistorial, state.titulo),
-      'Conclusiones':            contains(secConclusion, state.titulo)
+      'Encabezado':    contains(headerText, state.titulo),
+      'Historial':     contains(secHistorial, state.titulo),
+      'Conclusiones':  contains(secConclusion, state.titulo)
     };
     const tAll  = Object.values(tLocations).every(Boolean);
-    const tSome = Object.values(tLocations).some(Boolean);
     const tMiss = Object.entries(tLocations).filter(([,v])=>!v).map(([k])=>k);
-
     let tStatus, tMsg;
     if (tUnfilled) {
-      tStatus = 'warn'; tMsg = 'Placeholder &lt;titulo&gt; todavía sin reemplazar en el documento.';
+      tStatus = 'warn'; tMsg = 'Placeholder sin reemplazar en el documento.';
     } else if (tAll) {
       tStatus = 'ok';  tMsg = 'Coincide en todas las secciones esperadas.';
-    } else if (!tSome) {
-      tStatus = 'err'; tMsg = 'Valor no encontrado en ninguna sección del documento.';
     } else {
-      tStatus = 'err'; tMsg = `Falta o es diferente en: <strong>${tMiss.join(', ')}</strong>`;
+      tStatus = 'err'; tMsg = `Falta o no coincide en: <strong>${tMiss.join(', ')}</strong>`;
     }
     checks.push({ campo: 'Título', valor: state.titulo, status: tStatus, msg: tMsg, locations: tLocations });
   }
 
-  // ── TAREA ────────────────────────────────
+  // ── TAREA ────────────────────────────────────────────────────────
   if (state.tarea) {
     const taUnfilled = hasPlaceholder(full, 'Tarea', 'tarea');
     const taLocations = {
-      'Conclusiones · fila ID Azure': contains(secConclusion, state.tarea)
+      'Conclusiones': contains(secConclusion, state.tarea)
     };
     let taStatus, taMsg;
     if (taUnfilled) {
-      taStatus = 'warn'; taMsg = 'Placeholder &lt;Tarea&gt; todavía sin reemplazar.';
-    } else if (taLocations['Conclusiones · fila ID Azure']) {
+      taStatus = 'warn'; taMsg = 'Placeholder sin reemplazar.';
+    } else if (taLocations['Conclusiones']) {
       taStatus = 'ok';  taMsg = 'Encontrado correctamente en la tabla de conclusiones.';
     } else {
-      taStatus = 'err'; taMsg = 'No encontrado en la fila "ID Azure" de la tabla de conclusiones.';
+      taStatus = 'err'; taMsg = 'No encontrado en la tabla de conclusiones.';
     }
-    checks.push({ campo: 'Tarea · ID Azure', valor: state.tarea, status: taStatus, msg: taMsg, locations: taLocations });
+    checks.push({ campo: 'Tarea', valor: state.tarea, status: taStatus, msg: taMsg, locations: taLocations });
   }
 
-  // ── CONSECUTIVO (opcional) ───────────────
+  // ── NÚMERO (consecutivo) ─────────────────────────────────────────
   const cUnfilled = hasPlaceholder(full, 'Consecutivo', 'consecutivo');
   if (state.consecutivo) {
     const cLocations = {
@@ -1128,63 +1112,116 @@ function runChecks(headerText, bodyText) {
       'Conclusiones':              contains(secConclusion, state.consecutivo)
     };
     const cAll  = Object.values(cLocations).every(Boolean);
-    const cSome = Object.values(cLocations).some(Boolean);
     const cMiss = Object.entries(cLocations).filter(([,v])=>!v).map(([k])=>k);
-
     let cStatus, cMsg;
     if (cUnfilled) {
-      cStatus = 'warn'; cMsg = 'Placeholder &lt;Consecutivo&gt; todavía sin reemplazar.';
+      cStatus = 'warn'; cMsg = 'Placeholder sin reemplazar.';
     } else if (cAll) {
-      cStatus = 'ok';  cMsg = 'Coincide en información del documento y conclusiones.';
-    } else if (!cSome) {
-      cStatus = 'err'; cMsg = 'Valor no encontrado en ninguna sección.';
+      cStatus = 'ok';  cMsg = 'Coincide en ambas secciones esperadas.';
     } else {
-      cStatus = 'err'; cMsg = `Falta o es diferente en: <strong>${cMiss.join(', ')}</strong>`;
+      cStatus = 'err'; cMsg = `Falta o no coincide en: <strong>${cMiss.join(', ')}</strong>`;
     }
-    checks.push({ campo: 'Consecutivo', valor: state.consecutivo, status: cStatus, msg: cMsg, locations: cLocations });
+    checks.push({ campo: 'Número', valor: state.consecutivo, status: cStatus, msg: cMsg, locations: cLocations });
   } else if (cUnfilled) {
-    checks.push({ campo: 'Consecutivo', valor: null, status: 'warn',
-      msg: 'Campo &lt;Consecutivo&gt; sin completar. No se proporcionó valor de referencia.' });
+    checks.push({ campo: 'Número', valor: null, status: 'warn',
+      msg: 'Sin completar en el documento y no se proporcionó valor de referencia.' });
   }
 
-  // ── AUTOR (consistencia interna) ─────────
-  const autorUnfilled = hasPlaceholder(full, 'autor', 'Autor');
-  checks.push({ campo: 'Autor', valor: null,
-    status: autorUnfilled ? 'warn' : 'ok',
-    msg: autorUnfilled
-      ? 'Campo &lt;Autor&gt; sin completar en historial de revisiones.'
-      : 'Campo autor completado en historial de revisiones.'
-  });
-
-  // ── FECHA (consistencia interna) ─────────
-  const fechaUnfilled = hasPlaceholder(full, 'fecha', 'Fecha');
-  const fechaLocations = {
-    'Encabezado':              !hasPlaceholder(headerText, 'fecha'),
-    'Historial de revisiones': !hasPlaceholder(secHistorial, 'fecha')
-  };
-  const fechaAllFilled = Object.values(fechaLocations).every(Boolean);
-  checks.push({ campo: 'Fecha', valor: null,
-    status: fechaUnfilled ? 'warn' : 'ok',
-    msg: fechaUnfilled
-      ? 'Campo &lt;fecha&gt; sin completar en: ' +
-        Object.entries(fechaLocations).filter(([,v])=>!v).map(([k])=>k).join(', ') + '.'
-      : 'Campo fecha completado en encabezado e historial.',
-    locations: fechaLocations
-  });
-
-  // ── CAMPOS TEXTO VULNERABILIDAD ──────────
-  const textoMap = {
-    'texto_desc':  'Descripción de vulnerabilidad',
-    'texto_repro': 'Pasos de reproducción',
-    'texto_imp':   'Impacto',
-    'texto_recom': 'Recomendación'
-  };
-  Object.entries(textoMap).forEach(([key, label]) => {
-    if (hasPlaceholder(full, key)) {
-      checks.push({ campo: label, valor: null, status: 'warn',
-        msg: `Placeholder &lt;${key}&gt; sin reemplazar con contenido real.` });
+  // ── AUTOR: todos deben ser iguales entre sí ──────────────────────
+  {
+    const autorUnfilled = hasPlaceholder(full, 'autor', 'Autor');
+    if (autorUnfilled) {
+      checks.push({ campo: 'Autor', valor: null, status: 'warn',
+        msg: 'Sin completar en el documento.' });
+    } else {
+      // Extraer valores reales de autor en historial (filas de la tabla)
+      const autoresEncontrados = [];
+      const lineas = secHistorial.split('\n').map(l => l.trim()).filter(Boolean);
+      // Buscar líneas que sean autores (columna autor en la tabla del historial)
+      // El autor aparece como valor en la columna más a la derecha de cada fila
+      // Estrategia: buscar patrones de nombre (2+ palabras, sin números ni símbolos <>&)
+      const nombreRe = /^[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+(?:\s+[A-Za-záéíóúñ]+){1,4}$/;
+      for (const l of lineas) {
+        if (nombreRe.test(l) && !l.includes('<') && !l.includes('>')) {
+          autoresEncontrados.push(l);
+        }
+      }
+      const unicos = [...new Set(autoresEncontrados)];
+      if (unicos.length === 0) {
+        checks.push({ campo: 'Autor', valor: null, status: 'ok',
+          msg: 'Campo autor completado en historial de revisiones.' });
+      } else if (unicos.length === 1) {
+        checks.push({ campo: 'Autor', valor: unicos[0], status: 'ok',
+          msg: `Consistente en todas las filas del historial.` });
+      } else {
+        checks.push({ campo: 'Autor', valor: null, status: 'err',
+          msg: `Se encontraron <strong>${unicos.length} valores distintos</strong> de autor en el historial. Deben ser iguales.` });
+      }
     }
-  });
+  }
+
+  // ── FECHA: todas deben ser iguales entre sí ──────────────────────
+  {
+    const fechaUnfilled = hasPlaceholder(full, 'fecha', 'Fecha');
+    if (fechaUnfilled) {
+      const fechaLocations = {
+        'Encabezado': !hasPlaceholder(headerText, 'fecha'),
+        'Historial':  !hasPlaceholder(secHistorial, 'fecha')
+      };
+      const pendientes = Object.entries(fechaLocations).filter(([,v])=>!v).map(([k])=>k);
+      checks.push({ campo: 'Fecha', valor: null, status: 'warn',
+        msg: `Sin completar en: <strong>${pendientes.join(', ')}</strong>`,
+        locations: fechaLocations });
+    } else {
+      // Extraer fechas reales del documento (formato dd/mm/yyyy, yyyy-mm-dd, o texto mes año)
+      const fechaRe = /\b(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}|\d{4}[\/\-]\d{1,2}[\/\-]\d{1,2}|(?:enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)\s+\d{4})\b/gi;
+      const fechasHeader  = [...(headerText.matchAll(fechaRe))].map(m => m[0].toLowerCase().trim());
+      const fechasHist    = [...(secHistorial.matchAll(fechaRe))].map(m => m[0].toLowerCase().trim());
+      const todasFechas   = [...fechasHeader, ...fechasHist];
+      const unicasFechas  = [...new Set(todasFechas)];
+
+      if (unicasFechas.length === 0) {
+        checks.push({ campo: 'Fecha', valor: null, status: 'ok',
+          msg: 'Campo fecha completado en el documento.' });
+      } else if (unicasFechas.length === 1) {
+        checks.push({ campo: 'Fecha', valor: unicasFechas[0], status: 'ok',
+          msg: 'Consistente en encabezado e historial de revisiones.',
+          locations: { 'Encabezado': fechasHeader.length > 0, 'Historial': fechasHist.length > 0 } });
+      } else {
+        checks.push({ campo: 'Fecha', valor: null, status: 'err',
+          msg: `Se encontraron <strong>${unicasFechas.length} fechas distintas</strong> en el documento. Deben ser iguales en todas las secciones.`,
+          locations: { 'Encabezado': fechasHeader.length > 0, 'Historial': fechasHist.length > 0 } });
+      }
+    }
+  }
+
+  // ── SECCIONES DE VULNERABILIDAD ──────────────────────────────────
+  const seccionesReq = {
+    'Descripción':   ['<descripción>', '<descripcion>', 'texto_desc'],
+    'Reproducción':  ['<reproducción>', '<reproduccion>', 'texto_repro'],
+    'Impacto':       ['<impacto>', 'texto_imp'],
+    'Recomendación': ['<recomendación>', '<recomendacion>', 'texto_recom'],
+    'Evidencia':     ['<evidencia>']
+  };
+
+  for (const [nombre, placeholders] of Object.entries(seccionesReq)) {
+    const hayEncabezado = secVuln.toLowerCase().includes(nombre.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')) ||
+                          full.toLowerCase().includes(`**<${nombre.toLowerCase()}**`) ||
+                          full.toLowerCase().includes(`<${nombre.toLowerCase()}>`) ||
+                          full.toLowerCase().includes(`<${nombre.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')}>`);
+    const hayPlaceholder = placeholders.some(p => hasPlaceholder(full, p.replace(/[<>]/g, '')));
+
+    if (hayPlaceholder) {
+      checks.push({ campo: `Sección · ${nombre}`, valor: null, status: 'warn',
+        msg: 'Sección presente pero sin contenido real (placeholder sin reemplazar).' });
+    } else if (!hayEncabezado) {
+      checks.push({ campo: `Sección · ${nombre}`, valor: null, status: 'err',
+        msg: 'Sección no encontrada en el documento.' });
+    } else {
+      checks.push({ campo: `Sección · ${nombre}`, valor: null, status: 'ok',
+        msg: 'Sección presente con contenido.' });
+    }
+  }
 
   return checks;
 }
@@ -1421,7 +1458,7 @@ async function runVerification() {
     renderSpell(spellResult);
 
     document.getElementById('resultTimestamp').textContent =
-      `Verificado: ${new Date().toLocaleString('es-CO')} · ${state.file.name}`;
+      `Verificado: ${new Date().toLocaleString('es-CO')}`;
 
     goToStep(3);
 
@@ -1436,9 +1473,23 @@ async function runVerification() {
 //  RESET
 // ══════════════════════════════════════════
 function resetAll() {
+  // Limpiar estado en memoria
+  state.apiKey = '';
+  state.titulo = '';
+  state.tarea  = '';
+  state.consecutivo = '';
+  state.file   = null;
+
+  // Limpiar formulario
+  document.getElementById('apiKey').value      = '';
+  document.getElementById('titulo').value      = '';
+  document.getElementById('tarea').value       = '';
+  document.getElementById('consecutivo').value = '';
+  clearErrors();
   removeFile();
-  document.getElementById('step3').querySelector('#checksContainer').innerHTML = '';
-  document.getElementById('step3').querySelector('#spellContainer').innerHTML  = '';
+
+  document.getElementById('checksContainer').innerHTML = '';
+  document.getElementById('spellContainer').innerHTML  = '';
   goToStep(1);
 }
 
@@ -1454,13 +1505,7 @@ function toggleKey() {
 //  INIT
 // ══════════════════════════════════════════
 (function init() {
-  try {
-    const saved = localStorage.getItem('ai_key_anthropic');
-    if (saved) {
-      document.getElementById('apiKey').value = saved;
-      document.getElementById('saveKey').checked = true;
-    }
-  } catch(e) { /* localStorage bloqueado */ }
+  // Sin persistencia - todo local en memoria por sesión
 })();
 </script>
 </body>
