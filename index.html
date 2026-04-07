@@ -772,6 +772,7 @@
         Verificar ✓
       </button>
     </div>
+    <div id="verifyError" style="display:none;margin-top:12px;font-size:12px;color:var(--err);font-family:var(--mono);background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.2);border-radius:8px;padding:10px 14px;"></div>
   </div>
 
   <!-- STEP 3: Resultados -->
@@ -1292,30 +1293,10 @@ function runChecks(headerText, bodyText) {
 }
 
 // ══════════════════════════════════════════
-//  API SPELL CHECK
+//  LLAMADA GENÉRICA A LA API (multi-proveedor)
 // ══════════════════════════════════════════
-async function spellCheck(bodyText) {
-  const match = bodyText.match(/Vulnerabilidades\s+encontradas([\s\S]*?)An[aá]lisis\s+de\s+vulnerabilidades/i);
-  const section = match ? match[1].trim() : '';
-
-  if (!section || section.length < 30) {
-    return {
-      errores: [], total: 0,
-      nota: 'No se detectó contenido en la sección "Vulnerabilidades encontradas". Puede que los campos texto_xxxx no hayan sido llenados.'
-    };
-  }
-
-  const prompt = `Revisa ortografía del siguiente texto de un informe de seguridad en español. Ignora tecnicismos en inglés (API, endpoint, payload, HTTP, etc.). Devuelve SOLO este JSON (sin markdown):
-{"errores":[{"palabra":"palabra_incorrecta","sugerencia":"corrección","contexto":"fragmento donde aparece"}],"total":0}
-Si no hay errores: {"errores":[],"total":0}
-
-Texto:
-${section.substring(0, 2500)}`;
-
-  const system = 'Eres un corrector ortográfico para documentos técnicos en español colombiano. Responde SOLO con JSON válido, sin markdown.';
-
+async function callAI(system, prompt, maxTokens = 1200) {
   let response;
-
   if (state.provider === 'anthropic') {
     response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -1327,46 +1308,29 @@ ${section.substring(0, 2500)}`;
       },
       body: JSON.stringify({
         model: 'claude-sonnet-4-20250514',
-        max_tokens: 1000,
+        max_tokens: maxTokens,
         system,
         messages: [{ role: 'user', content: prompt }]
       })
     });
-
   } else if (state.provider === 'openai') {
     response = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${state.apiKey}`
-      },
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${state.apiKey}` },
       body: JSON.stringify({
-        model: 'gpt-4o-mini',
-        max_tokens: 1000,
-        messages: [
-          { role: 'system', content: system },
-          { role: 'user', content: prompt }
-        ]
+        model: 'gpt-4o-mini', max_tokens: maxTokens,
+        messages: [{ role: 'system', content: system }, { role: 'user', content: prompt }]
       })
     });
-
   } else if (state.provider === 'groq') {
     response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${state.apiKey}`
-      },
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${state.apiKey}` },
       body: JSON.stringify({
-        model: 'llama3-8b-8192',
-        max_tokens: 1000,
-        messages: [
-          { role: 'system', content: system },
-          { role: 'user', content: prompt }
-        ]
+        model: 'llama3-8b-8192', max_tokens: maxTokens,
+        messages: [{ role: 'system', content: system }, { role: 'user', content: prompt }]
       })
     });
-
   } else if (state.provider === 'gemini') {
     response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${state.apiKey}`,
@@ -1375,7 +1339,7 @@ ${section.substring(0, 2500)}`;
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           contents: [{ parts: [{ text: system + '\n\n' + prompt }] }],
-          generationConfig: { maxOutputTokens: 1000 }
+          generationConfig: { maxOutputTokens: maxTokens }
         })
       }
     );
@@ -1383,24 +1347,224 @@ ${section.substring(0, 2500)}`;
 
   if (!response.ok) {
     const err = await response.json().catch(() => ({}));
-    const msg = err.error?.message || err.error?.status || `HTTP ${response.status}`;
-    throw new Error(msg);
+    throw new Error(err.error?.message || err.error?.status || `HTTP ${response.status}`);
   }
 
   const data = await response.json();
-
-  // Extraer texto según proveedor
   let raw = '';
-  if (state.provider === 'anthropic') {
-    raw = data.content[0].text;
-  } else if (state.provider === 'openai' || state.provider === 'groq') {
-    raw = data.choices[0].message.content;
-  } else if (state.provider === 'gemini') {
-    raw = data.candidates[0].content.parts[0].text;
+  if (state.provider === 'anthropic')                       raw = data.content[0].text;
+  else if (state.provider === 'openai' || state.provider === 'groq') raw = data.choices[0].message.content;
+  else if (state.provider === 'gemini')                     raw = data.candidates[0].content.parts[0].text;
+
+  return raw.trim().replace(/^```json\s*/i,'').replace(/^```\s*/i,'').replace(/\s*```$/i,'').trim();
+}
+
+// ══════════════════════════════════════════
+//  EXTRACCIÓN DE CAMPOS VÍA IA
+// ══════════════════════════════════════════
+async function extractFields(headerText, bodyText) {
+  const system = 'Eres un extractor de campos de documentos técnicos. Responde SOLO con JSON válido, sin markdown, sin explicaciones.';
+
+  const prompt = `Analiza este informe de pruebas de seguridad y extrae los siguientes campos con precisión.
+
+REGLAS IMPORTANTES:
+- Si un campo tiene el valor "<algo>" (placeholder sin reemplazar), devuelve null para ese campo
+- El título aparece en el encabezado (después de "Informe de pruebas de seguridad:"), en la descripción del historial de revisiones, y en el párrafo de conclusiones
+- El autor aparece en la tabla "Información del documento" (campo Autor) y como última columna en CADA fila del historial de revisiones (puede estar partido en 2 líneas por la tabla, únelas)
+- La fecha aparece en el encabezado (después de "Fecha") y como primera columna en CADA fila del historial de revisiones
+- El número/código aparece en la tabla "Información del documento" como campo "Código" y en la tabla de conclusiones como "Consecutivo"
+- La tarea aparece en la tabla de conclusiones como "ID Azure"
+- Para las secciones de vulnerabilidad, verifica si hay contenido real (no placeholders) en Descripción, Reproducción, Impacto, Recomendación y Evidencia
+
+Devuelve exactamente este JSON:
+{
+  "titulo_encabezado": "valor o null",
+  "titulo_historial": "valor o null",
+  "titulo_conclusiones": "valor o null",
+  "autor_info_documento": "valor o null",
+  "autor_historial_fila1": "valor o null",
+  "autor_historial_fila2": "valor o null",
+  "fecha_encabezado": "valor o null",
+  "fecha_historial_fila1": "valor o null",
+  "fecha_historial_fila2": "valor o null",
+  "tarea": "valor o null",
+  "numero_info_documento": "valor o null",
+  "numero_conclusiones": "valor o null",
+  "seccion_descripcion": true/false,
+  "seccion_reproduccion": true/false,
+  "seccion_impacto": true/false,
+  "seccion_recomendacion": true/false,
+  "seccion_evidencia": true/false,
+  "errores_ortograficos": [{"palabra":"incorrecta","sugerencia":"correcta","contexto":"..."}]
+}
+
+ENCABEZADO:
+${headerText.substring(0, 500)}
+
+DOCUMENTO:
+${bodyText.substring(0, 4000)}`;
+
+  const raw = await callAI(system, prompt, 1500);
+  return JSON.parse(raw);
+}
+
+// ══════════════════════════════════════════
+//  COMPARACIÓN DE CAMPOS EXTRAÍDOS
+// ══════════════════════════════════════════
+function norm(s) { return s ? s.trim().toLowerCase() : null; }
+function eq(a, b) { return norm(a) === norm(b); }
+
+function buildChecks(extracted) {
+  const checks = [];
+  const u = extracted; // alias corto
+
+  // ── TÍTULO ──────────────────────────────
+  {
+    const vals = {
+      'Encabezado':  u.titulo_encabezado,
+      'Historial':   u.titulo_historial,
+      'Conclusiones':u.titulo_conclusiones
+    };
+    const nulls    = Object.entries(vals).filter(([,v])=>!v).map(([k])=>k);
+    const nonNull  = Object.entries(vals).filter(([,v])=>!!v);
+    const unicos   = [...new Set(nonNull.map(([,v])=>norm(v)))];
+
+    if (state.titulo) {
+      // Comparar contra valor ingresado
+      const locations = {};
+      for (const [k,v] of Object.entries(vals)) locations[k] = v ? eq(v, state.titulo) : false;
+      const mismatches = Object.entries(locations).filter(([,v])=>!v).map(([k])=>k);
+      if (mismatches.length === 0) {
+        checks.push({ campo:'Título', valor:state.titulo, status:'ok', msg:'Coincide en todas las secciones.', locations });
+      } else {
+        const detail = Object.entries(vals).map(([k,v])=>`${k}: "${v||'—'}"`).join(' · ');
+        checks.push({ campo:'Título', valor:state.titulo, status:'err',
+          msg:`No coincide en: <strong>${mismatches.join(', ')}</strong><br><small style="color:var(--muted)">${detail}</small>`, locations });
+      }
+    } else {
+      // Solo verificar consistencia interna
+      if (nulls.length > 0) {
+        checks.push({ campo:'Título', valor:null, status:'warn',
+          msg:`Sin completar en: <strong>${nulls.join(', ')}</strong>` });
+      } else if (unicos.length === 1) {
+        checks.push({ campo:'Título', valor:nonNull[0][1], status:'ok', msg:'Consistente en todas las secciones.' });
+      } else {
+        const detail = nonNull.map(([k,v])=>`${k}: "${v}"`).join(' · ');
+        checks.push({ campo:'Título', valor:null, status:'err',
+          msg:`Valores distintos entre secciones.<br><small style="color:var(--muted)">${detail}</small>` });
+      }
+    }
   }
 
-  raw = raw.trim().replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/\s*```$/i, '').trim();
-  return JSON.parse(raw);
+  // ── TAREA ────────────────────────────────
+  {
+    if (!u.tarea) {
+      checks.push({ campo:'Tarea', valor:null, status:'warn', msg:'Campo sin completar en la tabla de conclusiones.' });
+    } else if (state.tarea && !eq(u.tarea, state.tarea)) {
+      checks.push({ campo:'Tarea', valor:state.tarea, status:'err',
+        msg:`El documento tiene <strong>"${u.tarea}"</strong> pero se ingresó <strong>"${state.tarea}"</strong>.`,
+        locations:{'Conclusiones': false} });
+    } else {
+      checks.push({ campo:'Tarea', valor:u.tarea, status:'ok',
+        msg:'Encontrado en la tabla de conclusiones.',
+        locations:{'Conclusiones': true} });
+    }
+  }
+
+  // ── NÚMERO ───────────────────────────────
+  {
+    const locations = {
+      'Información del documento': !!u.numero_info_documento,
+      'Conclusiones':              !!u.numero_conclusiones
+    };
+    if (!u.numero_info_documento && !u.numero_conclusiones) {
+      checks.push({ campo:'Número', valor:null, status:'warn', msg:'Sin completar en información del documento ni en conclusiones.', locations });
+    } else if (u.numero_info_documento && u.numero_conclusiones && !eq(u.numero_info_documento, u.numero_conclusiones)) {
+      checks.push({ campo:'Número', valor:null, status:'err',
+        msg:`Información del documento: <strong>"${u.numero_info_documento}"</strong> · Conclusiones: <strong>"${u.numero_conclusiones}"</strong>. Deben ser iguales.`, locations });
+    } else {
+      const val = u.numero_info_documento || u.numero_conclusiones;
+      if (state.consecutivo && !eq(val, state.consecutivo)) {
+        checks.push({ campo:'Número', valor:state.consecutivo, status:'err',
+          msg:`El documento tiene <strong>"${val}"</strong> pero se ingresó <strong>"${state.consecutivo}"</strong>.`, locations });
+      } else {
+        checks.push({ campo:'Número', valor:val, status:'ok',
+          msg:'Consistente en información del documento y conclusiones.', locations });
+      }
+    }
+  }
+
+  // ── AUTOR (3 apariciones) ────────────────
+  {
+    const vals = {
+      'Información del documento': u.autor_info_documento,
+      'Historial fila 1':          u.autor_historial_fila1,
+      'Historial fila 2':          u.autor_historial_fila2
+    };
+    const nulls   = Object.entries(vals).filter(([,v])=>!v).map(([k])=>k);
+    const nonNull = Object.entries(vals).filter(([,v])=>!!v);
+    const unicos  = [...new Set(nonNull.map(([,v])=>norm(v)))];
+
+    if (nulls.length === 3) {
+      checks.push({ campo:'Autor', valor:null, status:'warn', msg:'Sin completar en ninguna sección.' });
+    } else if (nulls.length > 0) {
+      checks.push({ campo:'Autor', valor:null, status:'warn',
+        msg:`Sin completar en: <strong>${nulls.join(', ')}</strong>` });
+    } else if (unicos.length === 1) {
+      checks.push({ campo:'Autor', valor:nonNull[0][1], status:'ok',
+        msg:'Consistente en las 3 apariciones del documento.',
+        locations: Object.fromEntries(nonNull.map(([k])=>[k,true])) });
+    } else {
+      const detail = nonNull.map(([k,v])=>`${k}: "${v}"`).join(' · ');
+      checks.push({ campo:'Autor', valor:null, status:'err',
+        msg:`Los autores no coinciden en las 3 apariciones.<br><small style="color:var(--muted)">${detail}</small>`,
+        locations: Object.fromEntries(nonNull.map(([k,v])=>[k, eq(v, nonNull[0][1])])) });
+    }
+  }
+
+  // ── FECHA (3 apariciones) ────────────────
+  {
+    const vals = {
+      'Encabezado':      u.fecha_encabezado,
+      'Historial fila 1':u.fecha_historial_fila1,
+      'Historial fila 2':u.fecha_historial_fila2
+    };
+    const nulls   = Object.entries(vals).filter(([,v])=>!v).map(([k])=>k);
+    const nonNull = Object.entries(vals).filter(([,v])=>!!v);
+    const unicos  = [...new Set(nonNull.map(([,v])=>norm(v)))];
+
+    if (nulls.length === 3) {
+      checks.push({ campo:'Fecha', valor:null, status:'warn', msg:'Sin completar en ninguna sección.' });
+    } else if (nulls.length > 0) {
+      checks.push({ campo:'Fecha', valor:null, status:'warn',
+        msg:`Sin completar en: <strong>${nulls.join(', ')}</strong>` });
+    } else if (unicos.length === 1) {
+      checks.push({ campo:'Fecha', valor:nonNull[0][1], status:'ok',
+        msg:'Consistente en encabezado e historial de revisiones.',
+        locations: Object.fromEntries(nonNull.map(([k])=>[k,true])) });
+    } else {
+      const detail = nonNull.map(([k,v])=>`${k}: "${v}"`).join(' · ');
+      checks.push({ campo:'Fecha', valor:null, status:'err',
+        msg:`Las fechas no coinciden en las 3 apariciones.<br><small style="color:var(--muted)">${detail}</small>`,
+        locations: Object.fromEntries(nonNull.map(([k,v])=>[k, eq(v, nonNull[0][1])])) });
+    }
+  }
+
+  // ── SECCIONES DE VULNERABILIDAD ──────────
+  const secciones = [
+    ['Descripción',  u.seccion_descripcion],
+    ['Reproducción', u.seccion_reproduccion],
+    ['Impacto',      u.seccion_impacto],
+    ['Recomendación',u.seccion_recomendacion],
+    ['Evidencia',    u.seccion_evidencia]
+  ];
+  for (const [nombre, presente] of secciones) {
+    checks.push({ campo:`Sección · ${nombre}`, valor:null,
+      status: presente ? 'ok' : 'warn',
+      msg: presente ? 'Sección presente con contenido.' : 'Sección no encontrada o sin contenido real.' });
+  }
+
+  return checks;
 }
 
 // ══════════════════════════════════════════
@@ -1437,17 +1601,13 @@ function renderChecks(checks) {
   `).join('');
 }
 
-function renderSpell(result) {
+function renderSpell(errores) {
   const container = document.getElementById('spellContainer');
-  if (result.nota) {
-    container.innerHTML = `<div style="font-size:13px;color:var(--muted);padding:8px 0">ℹ️ ${result.nota}</div>`;
-    return;
-  }
-  if (!result.errores || result.errores.length === 0) {
+  if (!errores || errores.length === 0) {
     container.innerHTML = `<div class="spell-ok">✅ Sin errores ortográficos detectados en las secciones de texto.</div>`;
     return;
   }
-  container.innerHTML = result.errores.map(e => `
+  container.innerHTML = errores.map(e => `
     <div class="spell-error">
       <div class="spell-word">
         <span class="spell-wrong">${e.palabra}</span>
@@ -1459,13 +1619,11 @@ function renderSpell(result) {
   `).join('');
 }
 
-function renderBanner(checks, spellResult) {
-  const errors  = checks.filter(c => c.status === 'err').length;
-  const warns   = checks.filter(c => c.status === 'warn').length;
-  const spellErrors = spellResult?.errores?.length || 0;
-  const total = errors + warns + spellErrors;
-
-  const ok = checks.filter(c => c.status === 'ok').length;
+function renderBanner(checks, erroresOrtografia) {
+  const errors      = checks.filter(c => c.status === 'err').length;
+  const warns       = checks.filter(c => c.status === 'warn').length;
+  const spellErrors = erroresOrtografia?.length || 0;
+  const ok          = checks.filter(c => c.status === 'ok').length;
 
   const banner = document.getElementById('resultBanner');
   const icon   = document.getElementById('bannerIcon');
@@ -1497,30 +1655,24 @@ async function runVerification() {
   if (!state.file) return;
 
   try {
-    showLoading('Procesando documento…', 'Descomprimiendo y extrayendo XML del .docx');
+    showLoading('Leyendo documento…', 'Extrayendo contenido del .docx');
 
     // 1. Parsear docx
     const { headerText, bodyText } = await parseDOCX(state.file);
 
-    // 2. Verificar campos
-    updateLoading('Verificando campos…', 'Comparando valores en encabezado, historial y conclusiones');
-    await new Promise(r => setTimeout(r, 400)); // UX pause
-    const checks = runChecks(headerText, bodyText);
+    // 2. Una sola llamada a la IA: extrae campos + ortografía
+    updateLoading('Analizando con IA…', 'Extrayendo campos y verificando consistencia');
+    const extracted = await extractFields(headerText, bodyText);
 
-    // 3. Spell check via API
-    updateLoading('Revisando ortografía…', 'Consultando API de Anthropic');
-    let spellResult = { errores: [], total: 0 };
-    try {
-      spellResult = await spellCheck(bodyText);
-    } catch (err) {
-      spellResult = { errores: [], total: 0, nota: `No se pudo completar la revisión ortográfica: ${err.message}` };
-    }
+    // 3. Comparar campos extraídos
+    const checks = buildChecks(extracted);
+    const erroresOrtografia = extracted.errores_ortograficos || [];
 
     // 4. Renderizar
     hideLoading();
-    renderBanner(checks, spellResult);
+    renderBanner(checks, erroresOrtografia);
     renderChecks(checks);
-    renderSpell(spellResult);
+    renderSpell(erroresOrtografia);
 
     document.getElementById('resultTimestamp').textContent =
       `Verificado: ${new Date().toLocaleString('es-CO')}`;
@@ -1529,7 +1681,10 @@ async function runVerification() {
 
   } catch (err) {
     hideLoading();
-    alert(`Error al procesar el documento:\n${err.message}`);
+    // Mostrar error inline sin alert
+    const errDiv = document.getElementById('verifyError');
+    if (errDiv) { errDiv.textContent = `Error: ${err.message}`; errDiv.style.display = 'block'; }
+    else alert(`Error: ${err.message}`);
     console.error(err);
   }
 }
