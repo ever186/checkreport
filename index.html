@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -687,7 +688,7 @@
           <div class="provider-btn" data-provider="groq" onclick="selectProvider('groq')">
             <span class="p-icon">🟠</span>
             <span class="p-name">Groq</span>
-            <span class="p-model">Llama 3 · Free</span>
+            <span class="p-model">Llama 3.1 · Free</span>
           </div>
           <div class="provider-btn" data-provider="gemini" onclick="selectProvider('gemini')">
             <span class="p-icon">🔵</span>
@@ -1327,7 +1328,7 @@ async function callAI(system, prompt, maxTokens = 1200) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${state.apiKey}` },
       body: JSON.stringify({
-        model: 'llama3-8b-8192', max_tokens: maxTokens,
+        model: 'llama-3.1-8b-instant', max_tokens: maxTokens,
         messages: [{ role: 'system', content: system }, { role: 'user', content: prompt }]
       })
     });
