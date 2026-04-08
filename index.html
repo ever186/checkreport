@@ -1365,18 +1365,37 @@ async function callAI(system, prompt, maxTokens = 1200) {
 async function extractFields(headerText, bodyText) {
   const system = 'Eres un extractor de campos de documentos técnicos. Responde SOLO con JSON válido, sin markdown, sin explicaciones.';
 
-  const prompt = `Analiza este informe de pruebas de seguridad y extrae los siguientes campos con precisión.
+  const prompt = `Analiza este informe de pruebas de seguridad y extrae los campos indicados con precisión exacta.
 
-REGLAS IMPORTANTES:
-- Si un campo tiene el valor "<algo>" (placeholder sin reemplazar), devuelve null para ese campo
-- El título aparece en el encabezado (después de "Informe de pruebas de seguridad:"), en la descripción del historial de revisiones, y en el párrafo de conclusiones
-- El autor aparece en la tabla "Información del documento" (campo Autor) y como última columna en CADA fila del historial de revisiones (puede estar partido en 2 líneas por la tabla, únelas)
-- La fecha aparece en el encabezado (después de "Fecha") y como primera columna en CADA fila del historial de revisiones
-- El número/código aparece en la tabla "Información del documento" como campo "Código" y en la tabla de conclusiones como "Consecutivo"
-- La tarea aparece en la tabla de conclusiones como "ID Azure"
-- Para las secciones de vulnerabilidad, verifica si hay contenido real (no placeholders) en Descripción, Reproducción, Impacto, Recomendación y Evidencia
+CAMPOS A EXTRAER — busca EXACTAMENTE estos textos en el documento:
 
-Devuelve exactamente este JSON:
+1. titulo_encabezado: texto después de "Informe de pruebas de seguridad:" en el encabezado
+2. titulo_historial: texto después de "seguridad sobre" en la descripción del historial de revisiones
+3. titulo_conclusiones: texto después de "corresponden a la aplicación" en la sección Conclusiones
+
+4. autor_info_documento: valor en la fila "Autor:" de la tabla "Información del documento"
+5. autor_historial_fila1: valor columna "Autor" de la PRIMERA fila de datos del historial de revisiones (puede estar partido en 2 líneas, únelas con espacio)
+6. autor_historial_fila2: valor columna "Autor" de la SEGUNDA fila de datos del historial de revisiones (puede estar partido en 2 líneas, únelas con espacio)
+
+7. fecha_encabezado: texto después de "Fecha" en el encabezado del documento
+8. fecha_historial_fila1: valor columna "Fecha" de la PRIMERA fila de datos del historial
+9. fecha_historial_fila2: valor columna "Fecha" de la SEGUNDA fila de datos del historial
+
+10. tarea: valor en la fila cuya PRIMERA columna dice exactamente "ID Azure" dentro de la tabla de conclusiones
+11. numero_info_documento: valor en la fila cuya PRIMERA columna dice exactamente "Código:" en la tabla "Información del documento"
+12. numero_conclusiones: valor en la fila cuya PRIMERA columna dice exactamente "Consecutivo" dentro de la tabla de conclusiones
+
+13. seccion_descripcion: true si existe la palabra "Descripción:" o "Descripción" como encabezado de sección dentro de "Vulnerabilidades encontradas" Y tiene contenido real (no placeholder)
+14. seccion_reproduccion: true si existe "Reproducción:" o "Reproducción" como encabezado de sección dentro de "Vulnerabilidades encontradas" Y tiene contenido real
+15. seccion_impacto: true si existe "Impacto:" o "Impacto" como encabezado de sección dentro de "Vulnerabilidades encontradas" Y tiene contenido real
+16. seccion_recomendacion: true si existe "Recomendación:" o "Recomendación" como encabezado de sección dentro de "Vulnerabilidades encontradas" Y tiene contenido real
+17. seccion_evidencia: true si existe "Evidencia:" o "Evidencia" como encabezado de sección dentro de "Vulnerabilidades encontradas"
+
+18. errores_ortograficos: lista de errores ortográficos reales en español dentro de la sección "Vulnerabilidades encontradas". Ignora tecnicismos en inglés (API, endpoint, payload, HTTP, XSS, CSP, etc.)
+
+REGLA CRÍTICA: Si el valor de un campo es un placeholder como <tarea>, <titulo>, <autor>, <fecha>, <consecutivo> o similar (texto entre < >), devuelve null para ese campo.
+
+Devuelve SOLO este JSON sin markdown:
 {
   "titulo_encabezado": "valor o null",
   "titulo_historial": "valor o null",
@@ -1390,19 +1409,19 @@ Devuelve exactamente este JSON:
   "tarea": "valor o null",
   "numero_info_documento": "valor o null",
   "numero_conclusiones": "valor o null",
-  "seccion_descripcion": true/false,
-  "seccion_reproduccion": true/false,
-  "seccion_impacto": true/false,
-  "seccion_recomendacion": true/false,
-  "seccion_evidencia": true/false,
-  "errores_ortograficos": [{"palabra":"incorrecta","sugerencia":"correcta","contexto":"..."}]
+  "seccion_descripcion": true,
+  "seccion_reproduccion": true,
+  "seccion_impacto": true,
+  "seccion_recomendacion": true,
+  "seccion_evidencia": true,
+  "errores_ortograficos": []
 }
 
-ENCABEZADO:
-${headerText.substring(0, 500)}
+ENCABEZADO DEL DOCUMENTO:
+${headerText.substring(0, 600)}
 
-DOCUMENTO:
-${bodyText.substring(0, 4000)}`;
+CUERPO DEL DOCUMENTO:
+${bodyText.substring(0, 4500)}`;
 
   const raw = await callAI(system, prompt, 1500);
   try {
